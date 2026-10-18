@@ -1,5 +1,6 @@
 # timekeep: the clock restored once /data is mounted (battery RTC, vRTC kept
-# time, or the saved time), saved every minute and at shutdown.
+# time, or the saved time), saved every minute, whenever the clock is set, and at
+# shutdown.
 
 on post-fs-data
     mkdir /data/vendor/timekeep 0770 system system

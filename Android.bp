@@ -5,10 +5,34 @@
 // last-known time. A board adds `timekeep` to PRODUCT_PACKAGES and this
 // project's sepolicy/ to BOARD_VENDOR_SEPOLICY_DIRS.
 
-sh_binary {
+cc_defaults {
+    name: "timekeep_defaults",
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+    ],
+}
+
+cc_library_static {
+    name: "libtimekeep",
+    defaults: ["timekeep_defaults"],
+    vendor_available: true,
+    host_supported: true,
+    srcs: ["timekeep_core.cpp"],
+    export_include_dirs: ["."],
+}
+
+cc_binary {
     name: "timekeep",
-    src: "timekeep",
+    defaults: ["timekeep_defaults"],
     vendor: true,
+    srcs: ["main.cpp"],
+    static_libs: ["libtimekeep"],
+    shared_libs: [
+        "libbase",
+        "liblog",
+    ],
     required: ["init.timekeep.rc"],
 }
 
@@ -17,4 +41,13 @@ prebuilt_etc {
     src: "init.timekeep.rc",
     vendor: true,
     relative_install_path: "init",
+}
+
+cc_test {
+    name: "timekeep_test",
+    defaults: ["timekeep_defaults"],
+    host_supported: true,
+    srcs: ["timekeep_test.cpp"],
+    static_libs: ["libtimekeep"],
+    shared_libs: ["libbase"],
 }

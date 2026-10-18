@@ -11,11 +11,7 @@ init_daemon_domain(timekeep)
 
 type timekeep_data_file, file_type, data_file_type;
 
-# The script and the toybox applets it runs (date, cat, mv, sleep, log, expr,
-# getprop, hwclock).
-allow timekeep vendor_shell_exec:file rx_file_perms;
-allow timekeep vendor_toolbox_exec:file rx_file_perms;
-
+# One native binary; it runs nothing else.
 allow timekeep timekeep_data_file:dir rw_dir_perms;
 allow timekeep timekeep_data_file:file create_file_perms;
 
@@ -25,12 +21,12 @@ allow timekeep sysfs_rtc:file r_file_perms;
 allow timekeep sysfs_rtc:lnk_file read;
 
 # A battery-backed RTC, when fitted (/dev/rtc0, rtc_device; system:system 0640 by
-# the core ueventd.rc): read at restore (toybox hwclock -r opens it read-only).
-# Android's time detector, not this, writes it.
+# the core ueventd.rc): read at restore (opened read-only, RTC_RD_TIME). Android's
+# time detector, not this, writes it.
 allow timekeep rtc_device:chr_file r_file_perms;
 
 # The vendor image's build time (ro.vendor.build.date.utc), the floor of a
-# plausible restored time. Without it getprop answers empty, with no audit line.
+# plausible restored time. Without it the property reads empty, with no audit line.
 get_prop(timekeep, build_vendor_prop)
 
 # Setting the clock on restore (init grants SYS_TIME to the restore service only).
