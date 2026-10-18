@@ -1,2 +1,2 @@
-/vendor/bin/lc-timekeep          u:object_r:lc_timekeep_exec:s0
-/data/vendor/timekeep(/.*)?      u:object_r:lc_timekeep_data_file:s0
+/vendor/bin/timekeep          u:object_r:timekeep_exec:s0
+/data/vendor/timekeep(/.*)?      u:object_r:timekeep_data_file:s0

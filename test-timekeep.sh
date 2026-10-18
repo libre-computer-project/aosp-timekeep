@@ -1,13 +1,13 @@
 #!/bin/bash
-# test-lc-timekeep.sh -- restore/save cases for lc-timekeep with every I/O mocked
+# test-timekeep.sh -- restore/save cases for timekeep with every I/O mocked
 # (battery RTC, rtc sysfs, build time, clock, date -s, log).
 #
-#   test-lc-timekeep.sh [--adb "<adb command>"] [SCRIPT]
+#   test-timekeep.sh [--adb "<adb command>"] [SCRIPT]
 #
 # Without --adb the cases run on this host's /bin/sh. With --adb (e.g. --adb adb, or
 # --adb "sudo adb -s SERIAL") they run on the device under su with /system/bin/sh --
 # the real shell matters: Android's shell does 32-bit arithmetic, which a host shell
-# does not. SCRIPT defaults to the lc-timekeep beside this file (pass an older
+# does not. SCRIPT defaults to the timekeep beside this file (pass an older
 # revision to see the cases fail).
 set -u
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -17,16 +17,16 @@ if [ "${1:-}" = --adb ]; then
 	ADB=$2
 	shift 2
 fi
-SRC=${1:-$HERE/lc-timekeep}
+SRC=${1:-$HERE/timekeep}
 [ -r "$SRC" ] || { echo "no script: $SRC" >&2; exit 2; }
 
-# lc-timekeep never touches the network (operator decision 2026-10-18: no HTTP time).
+# timekeep never touches the network (operator decision 2026-10-18: no HTTP time).
 if grep -nE '(^|[^a-z_])(nc|wget|curl)[[:space:]]|https?://|HTTP' "$SRC"; then
 	echo "FAIL network access in $SRC" >&2
 	exit 1
 fi
 
-if [ -n "$ADB" ]; then D=/data/local/tmp/lc-timekeep-test; SH=/system/bin/sh
+if [ -n "$ADB" ]; then D=/data/local/tmp/timekeep-test; SH=/system/bin/sh
 else D=$(mktemp -d); SH=/bin/sh; fi
 OUT=$(mktemp -d)
 
@@ -42,7 +42,7 @@ sed -e "1s#.*#\#!$SH#" -e "s#^F=.*#F=$D/epoch#" \
 	-e "s#\$(date +%s)#\$(cat $D/now)#" \
 	-e "s#date -u -s \"@\$\([a-z]*\)\" > /dev/null#echo SET=\$\1#" \
 	-e "${HOSTDATE:-s#^\$##}" \
-	-e "s#log -t lc-timekeep#echo LOG#" "$SRC" > "$OUT/tk"
+	-e "s#log -t timekeep#echo LOG#" "$SRC" > "$OUT/tk"
 # The mocks must all have applied, or the cases test the real clock.
 for m in "cat $D/build" "cat $D/now" "echo SET=" "echo LOG" "$D/rtc/rtc"; do
 	grep -qF "$m" "$OUT/tk" || { echo "mock not applied: $m" >&2; exit 2; }

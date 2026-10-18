@@ -1,6 +1,6 @@
 # aosp-timekeep
 
-`lc-timekeep` starts an Android board's clock as close to real time as it can know
+`timekeep` starts an Android board's clock as close to real time as it can know
 without a network, for boards with no battery-backed RTC fitted (and uses one when it
 is). Android's network time (NTP) corrects whatever it leaves, in either direction.
 It never touches the network.
@@ -21,19 +21,19 @@ Android's time detector writes `/dev/rtc0` itself on every network or Settings t
 
 ```make
 # device.mk
-PRODUCT_PACKAGES += lc-timekeep
+PRODUCT_PACKAGES += timekeep
 # BoardConfig.mk
 BOARD_VENDOR_SEPOLICY_DIRS += vendor/libre-computer/timekeep/sepolicy
 ```
 
 and label the vRTC's sysfs device directory `sysfs_rtc` in the board's
-`genfs_contexts` (see `sepolicy/lc_timekeep.te`).
+`genfs_contexts` (see `sepolicy/timekeep.te`).
 
 ## Test
 
 ```sh
-./test-lc-timekeep.sh                      # cases on this host's /bin/sh
-./test-lc-timekeep.sh --adb "adb -s SERIAL" # the same cases on the device's shell
+./test-timekeep.sh                      # cases on this host's /bin/sh
+./test-timekeep.sh --adb "adb -s SERIAL" # the same cases on the device's shell
 ```
 
 Every I/O is mocked. Run the `--adb` form before landing a change: Android's shell

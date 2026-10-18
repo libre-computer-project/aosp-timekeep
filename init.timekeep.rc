@@ -1,0 +1,25 @@
+# timekeep: the clock restored once /data is mounted (battery RTC, vRTC kept
+# time, or the saved time), saved every minute and at shutdown.
+
+on post-fs-data
+    mkdir /data/vendor/timekeep 0770 system system
+    # Relabel what an earlier build left (its type was lc_timekeep_data_file, which
+    # no longer exists): without this the saved time reads as unlabeled.
+    restorecon_recursive /data/vendor/timekeep
+    exec_start vendor.timekeep-restore
+
+# Only the restore sets the clock, so only it holds SYS_TIME.
+service vendor.timekeep-restore /vendor/bin/timekeep restore
+    user system
+    group system
+    capabilities SYS_TIME
+    oneshot
+    disabled
+
+service vendor.timekeep /vendor/bin/timekeep save-loop
+    class main
+    user system
+    group system
+
+on shutdown
+    exec -- /vendor/bin/timekeep save

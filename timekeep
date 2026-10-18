@@ -1,17 +1,17 @@
 #!/vendor/bin/sh
 # SPDX-License-Identifier: Apache-2.0
 #
-# lc-timekeep -- start the clock as close to real time as the board can know without
+# timekeep -- start the clock as close to real time as the board can know without
 # a network.
 #
-#   lc-timekeep restore    once /data is mounted, if the clock is unset (earlier than
+#   timekeep restore    once /data is mounted, if the clock is unset (earlier than
 #                          the image's build time): set it from the best record -- a
 #                          battery-backed RTC (RTC_DEV) when one is fitted and reads a
 #                          plausible time, else the vRTC's kept time (share SRAM,
 #                          written every 60 s, survives a warm reset), else the saved
 #                          time. Either direction; an implausible record is ignored
-#   lc-timekeep save       write the current time (seconds since the epoch)
-#   lc-timekeep save-loop  save every 60 s for as long as the system runs
+#   timekeep save       write the current time (seconds since the epoch)
+#   timekeep save-loop  save every 60 s for as long as the system runs
 #
 # Network time (NetworkTimeUpdateService) corrects whatever this leaves, ahead or
 # behind, and Android writes the corrected time to RTC_DEV itself. This never touches
@@ -74,7 +74,7 @@ restore)
 	build=$(build_time)
 	now=$(date +%s)
 	if plausible "$now" "$build"; then
-		log -t lc-timekeep "clock already set ($now); restore skipped"
+		log -t timekeep "clock already set ($now); restore skipped"
 		exit 0
 	fi
 	best=; from=
@@ -92,11 +92,11 @@ restore)
 		plausible "$saved" "$build" && { best=$saved; from=saved; }
 	fi
 	if [ -z "$best" ]; then
-		log -t lc-timekeep "no plausible record; clock left at $now"
+		log -t timekeep "no plausible record; clock left at $now"
 		exit 0
 	fi
 	date -u -s "@$best" > /dev/null && \
-		log -t lc-timekeep "clock set from $now to $from $best"
+		log -t timekeep "clock set from $now to $from $best"
 	;;
 save)
 	save
@@ -108,7 +108,7 @@ save-loop)
 	done
 	;;
 *)
-	echo "usage: lc-timekeep restore|save|save-loop" >&2
+	echo "usage: timekeep restore|save|save-loop" >&2
 	exit 2
 	;;
 esac
