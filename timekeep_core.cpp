@@ -5,6 +5,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <linux/rtc.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -108,22 +109,37 @@ std::optional<int64_t> ReadSaved(const std::string& file) {
 }
 
 bool WriteSaved(const std::string& file, int64_t now) {
+    const std::string dir = file.substr(0, file.find_last_of('/') + 1);
+    const int dfd = open(dir.empty() ? "." : dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dfd < 0) return false;
+    // One writer at a time: the lock is released when dfd closes.
+    if (TEMP_FAILURE_RETRY(flock(dfd, LOCK_EX)) != 0) {
+        close(dfd);
+        return false;
+    }
     const std::string tmp = file + ".tmp";
     const int fd = open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0660);
-    if (fd < 0) return false;
+    if (fd < 0) {
+        close(dfd);
+        return false;
+    }
     const std::string text = std::to_string(now) + "\n";
     // The record exists for power cuts, so it must be on disk before it replaces the
     // old one: data first (fsync), then the rename, then the directory entry.
     bool ok = write(fd, text.data(), text.size()) == static_cast<ssize_t>(text.size());
     ok = ok && fsync(fd) == 0;
     close(fd);
-    if (!ok || rename(tmp.c_str(), file.c_str()) != 0) return false;
-    const std::string dir = file.substr(0, file.find_last_of('/') + 1);
-    const int dfd = open(dir.empty() ? "." : dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (dfd < 0) return false;
-    ok = fsync(dfd) == 0;
+    ok = ok && rename(tmp.c_str(), file.c_str()) == 0;
+    ok = ok && fsync(dfd) == 0;
     close(dfd);
     return ok;
+}
+
+int64_t SaveDelayMs(int64_t now_ms, std::optional<int64_t> last_ms, int64_t min_gap_ms) {
+    if (!last_ms) return 0;
+    const int64_t since = now_ms - *last_ms;
+    if (since < 0 || since >= min_gap_ms) return 0;
+    return min_gap_ms - since;
 }
 
 std::optional<int64_t> ReadRtcDevice(const std::string& dev) {

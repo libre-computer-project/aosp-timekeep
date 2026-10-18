@@ -62,8 +62,15 @@ std::optional<int64_t> ReadVrtc(const std::string& class_dir);
 // The saved record in file, if it parses.
 std::optional<int64_t> ReadSaved(const std::string& file);
 
-// Writes now to file through file.tmp + rename. False on any error.
+// Writes now to file through file.tmp + rename, holding an exclusive flock on the
+// directory so two writers (the save loop and the shutdown save) never share the
+// temp file. False on any error.
 bool WriteSaved(const std::string& file, int64_t now);
+
+// Milliseconds to wait before the next save so saves stay at least min_gap_ms
+// apart (a process setting the clock in a loop costs one write per gap, not one per
+// set); 0 means save now. last_ms is the previous save's monotonic time, if any.
+int64_t SaveDelayMs(int64_t now_ms, std::optional<int64_t> last_ms, int64_t min_gap_ms);
 
 // The time of an RTC device (RTC_RD_TIME), if it gives one: none when the device
 // is absent or refuses the read (never set, battery lost).

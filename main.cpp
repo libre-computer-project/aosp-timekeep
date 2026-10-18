@@ -9,6 +9,7 @@
 //                       plausible time, else the vRTC's kept time, else the saved time
 //   timekeep save       write the current time
 //   timekeep save-loop  save every 60 s, and at once whenever the clock is set
+//                       (saves at least 1 s apart)
 //
 // Network time (Android's time detector) corrects whatever this leaves, ahead or
 // behind, and writes /dev/rtc0 itself. This never touches the network.
@@ -24,6 +25,7 @@
 
 #include <cstring>
 #include <ctime>
+#include <optional>
 #include <string>
 
 #include "timekeep_core.h"
@@ -34,9 +36,16 @@ constexpr char kSaved[] = "/data/vendor/timekeep/epoch";
 constexpr char kRtcDevice[] = "/dev/rtc0";
 constexpr char kRtcClass[] = "/sys/class/rtc";
 constexpr time_t kSaveInterval = 60;
+constexpr int64_t kMinSaveGapMs = 1000;
 
 int64_t Now() {
     return static_cast<int64_t>(time(nullptr));
+}
+
+int64_t MonoMs() {
+    timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<int64_t>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
 }
 
 int64_t Build() {
@@ -104,20 +113,37 @@ int SaveLoop() {
         ALOGE("timerfd_settime: %s", strerror(errno));
         return 1;
     }
-    Save(build);
     pollfd fds[2] = {{tick, POLLIN, 0}, {set, POLLIN, 0}};
+    std::optional<int64_t> last_save;
+    bool pending = true;  // the first save, at start
     for (;;) {
-        if (poll(fds, 2, -1) < 0) {
+        // A save due inside kMinSaveGapMs of the last one waits out the gap (poll's
+        // timeout), so a burst of clock sets costs one write and the last set is kept.
+        int timeout = -1;
+        if (pending) {
+            const int64_t wait = timekeep::SaveDelayMs(MonoMs(), last_save, kMinSaveGapMs);
+            if (wait == 0) {
+                Save(build);
+                last_save = MonoMs();
+                pending = false;
+            } else {
+                timeout = static_cast<int>(wait);
+            }
+        }
+        if (poll(fds, 2, timeout) < 0) {
             if (errno == EINTR) continue;
             ALOGE("poll: %s", strerror(errno));
             return 1;
         }
         uint64_t n;
-        if (fds[0].revents & POLLIN) (void)read(tick, &n, sizeof(n));
+        if (fds[0].revents & POLLIN) {
+            (void)read(tick, &n, sizeof(n));
+            pending = true;
+        }
         if (fds[1].revents & POLLIN) {
             if (read(set, &n, sizeof(n)) < 0 && errno == ECANCELED) ArmClockSetWatch(set);
+            pending = true;
         }
-        Save(build);
     }
 }
 

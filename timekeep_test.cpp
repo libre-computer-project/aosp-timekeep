@@ -6,10 +6,16 @@
 #include "timekeep_core.h"
 
 #include <android-base/file.h>
+#include <fcntl.h>
 #include <gtest/gtest.h>
+#include <sys/file.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
+#include <atomic>
+#include <chrono>
 #include <string>
+#include <thread>
 
 namespace timekeep {
 namespace {
@@ -95,6 +101,22 @@ TEST(Save, TakesALaterClock) {
     EXPECT_TRUE(ShouldSave(kN + 60, kBuild));
 }
 
+TEST(SaveGap, FirstSaveIsImmediate) {
+    EXPECT_EQ(SaveDelayMs(5000, std::nullopt, 1000), 0);
+}
+TEST(SaveGap, InsideTheGapWaitsTheRest) {
+    EXPECT_EQ(SaveDelayMs(5300, 5000, 1000), 700);
+    EXPECT_EQ(SaveDelayMs(5000, 5000, 1000), 1000);
+}
+TEST(SaveGap, AtOrPastTheGapSavesNow) {
+    EXPECT_EQ(SaveDelayMs(6000, 5000, 1000), 0);
+    EXPECT_EQ(SaveDelayMs(9000, 5000, 1000), 0);
+}
+TEST(SaveGap, AClockThatWentBackSavesNow) {
+    // Monotonic does not go back; if a caller's does, never wait on it.
+    EXPECT_EQ(SaveDelayMs(4000, 5000, 1000), 0);
+}
+
 TEST(Parse, Epoch) {
     EXPECT_EQ(ParseEpoch("1792273000"), 1792273000);
     EXPECT_EQ(ParseEpoch("1792273000\n"), 1792273000);
@@ -153,6 +175,45 @@ TEST_F(Files, SavedJunkOrAbsent) {
 }
 TEST_F(Files, SaveFailsInAMissingDir) {
     EXPECT_FALSE(WriteSaved(Path("absent/epoch"), 1792273000));
+}
+TEST_F(Files, SaveWaitsForTheDirectoryLock) {
+    // Another writer holds the lock: the save must not touch the temp file until it
+    // is released.
+    const int held = open(dir.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    ASSERT_GE(held, 0);
+    ASSERT_EQ(flock(held, LOCK_EX), 0);
+    std::atomic<bool> done{false};
+    std::thread t([&] {
+        EXPECT_TRUE(WriteSaved(Path("epoch"), 1792273000));
+        done = true;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_FALSE(done);
+    struct stat st;
+    EXPECT_NE(stat(Path("epoch.tmp").c_str(), &st), 0);
+    close(held);
+    t.join();
+    EXPECT_TRUE(done);
+    EXPECT_EQ(ReadSaved(Path("epoch")), 1792273000);
+}
+TEST_F(Files, TwoWritersNeverTearTheRecord) {
+    // The save loop and the shutdown save, overlapping: every save succeeds and the
+    // record is always one writer's whole value.
+    std::atomic<int> failures{0};
+    auto writer = [&](int64_t base) {
+        for (int i = 0; i < 200; ++i) {
+            if (!WriteSaved(Path("epoch"), base + i)) ++failures;
+        }
+    };
+    std::thread a(writer, 1792270000), b(writer, 1792280000);
+    a.join();
+    b.join();
+    EXPECT_EQ(failures, 0);
+    const std::optional<int64_t> v = ReadSaved(Path("epoch"));
+    ASSERT_TRUE(v);
+    EXPECT_TRUE(*v == 1792270199 || *v == 1792280199) << *v;
+    struct stat st;
+    EXPECT_NE(stat(Path("epoch.tmp").c_str(), &st), 0);
 }
 TEST_F(Files, RtcDeviceAbsentOrNotAnRtc) {
     EXPECT_EQ(ReadRtcDevice(Path("rtc0")), std::nullopt);
