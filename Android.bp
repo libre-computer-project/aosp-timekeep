@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// lc-timekeep: the clock started as close to real time as a board can know without a
+// network -- a battery-backed RTC, the Amlogic vRTC's kept time, or a saved
+// last-known time. A board adds `lc-timekeep` to PRODUCT_PACKAGES and this
+// project's sepolicy/ to BOARD_VENDOR_SEPOLICY_DIRS.
+
+sh_binary {
+    name: "lc-timekeep",
+    src: "lc-timekeep",
+    vendor: true,
+    required: ["init.lc-timekeep.rc"],
+}
+
+prebuilt_etc {
+    name: "init.lc-timekeep.rc",
+    src: "init.lc-timekeep.rc",
+    vendor: true,
+    relative_install_path: "init",
+}

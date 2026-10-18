@@ -1,0 +1,37 @@
+# lc-timekeep: restores the clock at boot from a battery-backed RTC, the vRTC's
+# kept time or a saved last-known time, and saves the time every minute and at
+# shutdown. It never touches the network.
+#
+# The board labels the vRTC's sysfs device directory sysfs_rtc in its own
+# genfs_contexts (the path is per SoC), e.g. for GXL:
+#   genfscon sysfs /devices/platform/soc/c8100000.bus/c81000a8.rtc u:object_r:sysfs_rtc:s0
+type lc_timekeep, domain;
+type lc_timekeep_exec, exec_type, vendor_file_type, file_type;
+init_daemon_domain(lc_timekeep)
+
+type lc_timekeep_data_file, file_type, data_file_type;
+
+# The script and the toybox applets it runs (date, cat, mv, sleep, log, expr,
+# getprop, hwclock).
+allow lc_timekeep vendor_shell_exec:file rx_file_perms;
+allow lc_timekeep vendor_toolbox_exec:file rx_file_perms;
+
+allow lc_timekeep lc_timekeep_data_file:dir rw_dir_perms;
+allow lc_timekeep lc_timekeep_data_file:file create_file_perms;
+
+# The vRTC's kept time (/sys/class/rtc/rtcN/{name,since_epoch}).
+allow lc_timekeep sysfs_rtc:dir r_dir_perms;
+allow lc_timekeep sysfs_rtc:file r_file_perms;
+allow lc_timekeep sysfs_rtc:lnk_file read;
+
+# A battery-backed RTC, when fitted (/dev/rtc0, rtc_device; system:system 0640 by
+# the core ueventd.rc): read at restore (toybox hwclock -r opens it read-only).
+# Android's time detector, not this, writes it.
+allow lc_timekeep rtc_device:chr_file r_file_perms;
+
+# The vendor image's build time (ro.vendor.build.date.utc), the floor of a
+# plausible restored time. Without it getprop answers empty, with no audit line.
+get_prop(lc_timekeep, build_vendor_prop)
+
+# Setting the clock on restore (init grants SYS_TIME to the restore service only).
+allow lc_timekeep self:global_capability_class_set sys_time;

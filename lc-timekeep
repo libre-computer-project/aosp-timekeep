@@ -1,0 +1,114 @@
+#!/vendor/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# lc-timekeep -- start the clock as close to real time as the board can know without
+# a network.
+#
+#   lc-timekeep restore    once /data is mounted, if the clock is unset (earlier than
+#                          the image's build time): set it from the best record -- a
+#                          battery-backed RTC (RTC_DEV) when one is fitted and reads a
+#                          plausible time, else the vRTC's kept time (share SRAM,
+#                          written every 60 s, survives a warm reset), else the saved
+#                          time. Either direction; an implausible record is ignored
+#   lc-timekeep save       write the current time (seconds since the epoch)
+#   lc-timekeep save-loop  save every 60 s for as long as the system runs
+#
+# Network time (NetworkTimeUpdateService) corrects whatever this leaves, ahead or
+# behind, and Android writes the corrected time to RTC_DEV itself. This never touches
+# the network.
+#
+# The save takes the clock as it is, in either direction: on a product only Android's
+# time detector sets the clock (from the network, or the user in Settings), so a jump
+# is a correction. Picking the best record rather than the later one keeps a record
+# from a clock that was ahead from beating a newer, correct one.
+
+F=/data/vendor/timekeep/epoch
+# Plausible window: from the vendor image's build time to 20 years after it. If the
+# build time cannot be read, the floor is FLOOR (2026-01-01), never 0 -- a 0 floor
+# would make every real time "implausible" and leave the clock unset.
+SPAN=631152000
+FLOOR=1767225600
+# A battery-backed RTC, when fitted (an I2C part on the 40-pin header). The vRTC is
+# pinned to rtc1 by its DT alias, so an external RTC always enumerates as rtc0 --
+# the device the kernel's HCTOSYS reads and Android's time detector writes on every
+# network or Settings time. Built-in, HCTOSYS has already set the clock and restore
+# skips; if its driver ever comes up after HCTOSYS, restore reads it here.
+RTC_DEV=/dev/rtc0
+
+# Epoch arithmetic goes through toybox expr (64-bit): the shell's own $(( )) and
+# [ -lt ] are 32-bit on Android, so build + SPAN wraps negative today and every
+# epoch wraps in 2038.
+ge() { expr "$1" \>= "$2" > /dev/null; }
+
+build_time() {
+	b=$(getprop ro.vendor.build.date.utc)
+	case "$b" in ''|*[!0-9]*) b=$FLOOR ;; esac
+	ge "$b" "$FLOOR" || b=$FLOOR
+	echo "$b"
+}
+
+# plausible <value> <build>: 0 when <value> is a number inside the window.
+plausible() {
+	case "$1" in ''|*[!0-9]*) return 1 ;; esac
+	ge "$1" "$2" && ge "$(expr "$2" + "$SPAN")" "$1"
+}
+
+# An unset clock (before the build time) is never saved: it would replace a good
+# record with one the next restore has to throw away.
+save() {
+	now=$(date +%s) || return 1
+	plausible "$now" "$(build_time)" || return 0
+	echo "$now" > "$F.tmp" && mv "$F.tmp" "$F"
+}
+
+# rtc_read: print RTC_DEV's time (seconds since the epoch), nothing when there is no
+# RTC or it cannot give a time (never set, battery lost: the driver refuses the read).
+rtc_read() {
+	[ -e "$RTC_DEV" ] || return 1
+	r=$(hwclock -r -u -f "$RTC_DEV" 2>/dev/null) || return 1
+	date -u -D "%Y-%m-%d %H:%M:%S" -d "${r%+0000}" +%s 2>/dev/null
+}
+
+case "$1" in
+restore)
+	build=$(build_time)
+	now=$(date +%s)
+	if plausible "$now" "$build"; then
+		log -t lc-timekeep "clock already set ($now); restore skipped"
+		exit 0
+	fi
+	best=; from=
+	# A battery-backed RTC ran while the power was off: it outranks every record.
+	t=$(rtc_read)
+	plausible "$t" "$build" && { best=$t; from=rtc; }
+	[ -z "$best" ] && for r in /sys/class/rtc/rtc*; do
+		# name reads "<driver> <device>", e.g. "meson-vrtc c81000a8.rtc"
+		case "$(cat "$r/name" 2>/dev/null)" in meson-vrtc|"meson-vrtc "*) ;; *) continue ;; esac
+		kept=$(cat "$r/since_epoch" 2>/dev/null)
+		plausible "$kept" "$build" && { best=$kept; from=vrtc; }
+	done
+	if [ -z "$best" ] && [ -r "$F" ]; then
+		saved=$(cat "$F")
+		plausible "$saved" "$build" && { best=$saved; from=saved; }
+	fi
+	if [ -z "$best" ]; then
+		log -t lc-timekeep "no plausible record; clock left at $now"
+		exit 0
+	fi
+	date -u -s "@$best" > /dev/null && \
+		log -t lc-timekeep "clock set from $now to $from $best"
+	;;
+save)
+	save
+	;;
+save-loop)
+	while true; do
+		save
+		sleep 60
+	done
+	;;
+*)
+	echo "usage: lc-timekeep restore|save|save-loop" >&2
+	exit 2
+	;;
+esac
