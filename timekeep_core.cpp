@@ -112,9 +112,18 @@ bool WriteSaved(const std::string& file, int64_t now) {
     const int fd = open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0660);
     if (fd < 0) return false;
     const std::string text = std::to_string(now) + "\n";
-    const bool ok = write(fd, text.data(), text.size()) == static_cast<ssize_t>(text.size());
+    // The record exists for power cuts, so it must be on disk before it replaces the
+    // old one: data first (fsync), then the rename, then the directory entry.
+    bool ok = write(fd, text.data(), text.size()) == static_cast<ssize_t>(text.size());
+    ok = ok && fsync(fd) == 0;
     close(fd);
-    return ok && rename(tmp.c_str(), file.c_str()) == 0;
+    if (!ok || rename(tmp.c_str(), file.c_str()) != 0) return false;
+    const std::string dir = file.substr(0, file.find_last_of('/') + 1);
+    const int dfd = open(dir.empty() ? "." : dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dfd < 0) return false;
+    ok = fsync(dfd) == 0;
+    close(dfd);
+    return ok;
 }
 
 std::optional<int64_t> ReadRtcDevice(const std::string& dev) {
